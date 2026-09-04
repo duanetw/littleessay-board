@@ -134,6 +134,14 @@ body{
 .tk.hot{color:var(--neg);background:rgba(var(--neg-soft),.13)}
 .tk.hot b{color:var(--neg);opacity:.75}
 .tk.clown{color:var(--ink-3)}
+@media (hover:none), (max-width:700px){
+  /* 手指比游標粗：沒有滑鼠的裝置（含平板）把可點範圍加大 */
+  .trail-track{gap:7px;padding:8px 12px}
+  .tk{padding:6px 11px;font-size:12px}
+}
+@media (max-width:700px){
+  .trail .tlab{padding:0 11px;font-size:10.5px}
+}
 
 /* ---------- stats ---------- */
 .stats{
@@ -910,13 +918,34 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
     trailRaf = requestAnimationFrame(stepTrail);
   }
 
-  function holdTrail(){ trailHold = true; }
+  let trailIdle = null;
+  function holdTrail(){ trailHold = true; clearTimeout(trailIdle); }
   function releaseTrail(){
+    clearTimeout(trailIdle);
     trailHold = false;
     trailPos = $('#trailclip').scrollLeft;       /* 接手使用者撥到的位置 */
   }
-  $('#trail').addEventListener('pointerenter', holdTrail);
-  $('#trail').addEventListener('pointerleave', releaseTrail);
+  /* 手指放開之後還有慣性在跑，這時候把 scrollLeft 搶回來會把那一撥卡死，
+     所以等它自己停穩了再接手 */
+  function releaseWhenSettled(){
+    clearTimeout(trailIdle);
+    trailIdle = setTimeout(releaseTrail, 900);
+  }
+  $('#trail').addEventListener('pointerenter', e => {
+    if(e.pointerType === 'mouse') holdTrail();
+  });
+  $('#trail').addEventListener('pointerleave', e => {
+    if(e.pointerType === 'mouse') releaseTrail();
+  });
+  /* 觸控沒有「移開」：按著就停，放開等滑完再走 */
+  $('#trail').addEventListener('pointerdown', holdTrail);
+  ['pointerup', 'pointercancel'].forEach(ev =>
+    $('#trail').addEventListener(ev, e => {
+      if(e.pointerType !== 'mouse') releaseWhenSettled();
+    }));
+  $('#trailclip').addEventListener('scroll', () => {
+    if(trailHold && trailIdle) releaseWhenSettled();   /* 還在滑就再等一下 */
+  });
   $('#trail').addEventListener('focusin', holdTrail);
   /* 在帶子裡用鍵盤跳到下一顆時 focusout 也會觸發，別一閃就跑掉 */
   $('#trail').addEventListener('focusout', e => {
@@ -961,11 +990,16 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
       card.style.outlineOffset = '4px';
       setTimeout(() => { card.style.outline = ''; card.style.outlineOffset = ''; }, 2400);
     }
-    const head = parseFloat(getComputedStyle(document.documentElement)
-                   .getPropertyValue('--head-h')) || 0;
+    /* 表頭在窄螢幕會改回 static（讓表格自己的凍結列釘得住），
+       那時候不必替它讓位，否則會停在上一張卡的尾巴 */
+    const topEl = document.querySelector('.top');
+    const head = topEl && getComputedStyle(topEl).position === 'sticky'
+      ? topEl.offsetHeight : 0;
     const top = f.getBoundingClientRect().top + window.scrollY
               + (card ? card.getBoundingClientRect().top : 0) - head - 14;
-    window.scrollTo({top: Math.max(top, 0), behavior: 'smooth'});
+    /* 週報動輒上萬 px，smooth 會變成一秒多的模糊捲動；
+       模式本來就整個換掉了，沒有連續性要保，直接落點反而清楚 */
+    window.scrollTo(0, Math.max(top, 0));
   }
 
   /* controls */
