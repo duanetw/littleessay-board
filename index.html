@@ -68,10 +68,17 @@ body{
 .brand .sub b{color:var(--ink-2);font-weight:500;font-family:var(--mono)}
 
 /* 追蹤板 / 週報 切換 */
+.brand-right{display:flex;align-items:center;gap:10px;margin-left:auto;align-self:center}
 .modes{
-  display:flex;gap:2px;margin-left:auto;align-self:center;
+  display:flex;gap:2px;
   background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:3px;
 }
+.sidelink{
+  font-size:12.5px;color:var(--ink-3);text-decoration:none;white-space:nowrap;
+  border:1px solid var(--line);border-radius:9px;padding:6px 12px;
+}
+.sidelink:hover{color:var(--ink);border-color:var(--line-strong)}
+.sidelink:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mode{
   appearance:none;border:0;background:none;cursor:pointer;
   font-family:var(--sans);font-size:13px;font-weight:500;color:var(--ink-3);
@@ -414,9 +421,12 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
     <div class="brand">
       <h1>小論文經典</h1>
       <span class="sub">均線斜率 × 穿越追蹤　·　同步於 <b id="gen"></b></span>
-      <div class="modes" id="modes" role="tablist" hidden>
-        <button class="mode" role="tab" data-mode="board" aria-selected="true">追蹤板</button>
-        <button class="mode" role="tab" data-mode="report" aria-selected="false">週報</button>
+      <div class="brand-right">
+        <div class="modes" id="modes" role="tablist" hidden>
+          <button class="mode" role="tab" data-mode="board" aria-selected="true">追蹤板</button>
+          <button class="mode" role="tab" data-mode="report" aria-selected="false">週報</button>
+        </div>
+        <a class="sidelink" href="tape/">Tape ↗</a>
       </div>
     </div>
     <nav class="tabs" id="tabs" role="tablist"></nav>
