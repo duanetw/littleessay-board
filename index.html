@@ -97,6 +97,44 @@ body{
 .tab[aria-selected="true"] .n{background:var(--accent-soft);color:var(--accent)}
 .tab:focus-visible{outline:2px solid var(--accent);outline-offset:-3px;border-radius:6px 6px 0 0}
 
+/* ---------- 週報跑馬燈 ---------- */
+/* 追蹤板頂上的橫帶：這個市場的週報提過哪些股，新的排前面。
+   自己會走，滑鼠移上去就停，也可以直接用滾輪或手指撥。 */
+.trail{
+  position:relative;display:flex;align-items:stretch;margin:20px 0 0;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;box-shadow:var(--shadow);
+}
+.trail .tlab{
+  flex:0 0 auto;display:flex;align-items:center;padding:0 13px;
+  border-right:1px solid var(--line);background:var(--surface-2);
+  font-size:11px;letter-spacing:.09em;color:var(--ink-3);white-space:nowrap;
+}
+.trail-clip{
+  position:relative;flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:none;-ms-overflow-style:none;
+}
+.trail-clip::-webkit-scrollbar{display:none}
+.trail-track{display:flex;width:max-content;gap:6px;padding:9px 13px}
+/* 右緣淡出，暗示後面還有 */
+.trail .tfade{
+  position:absolute;top:1px;right:0;bottom:1px;width:36px;pointer-events:none;
+  background:linear-gradient(to left,var(--surface),transparent);
+}
+.tk{
+  appearance:none;border:0;cursor:pointer;font-family:var(--sans);
+  font-size:11.5px;color:var(--ink-2);background:var(--surface-3);
+  border-radius:5px;padding:3px 9px;white-space:nowrap;
+}
+.tk:hover{color:var(--ink);background:var(--line-strong)}
+.tk:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tk b{font-family:var(--mono);font-weight:500;color:var(--ink-3);margin-right:4px}
+.tk:hover b{color:var(--ink-2)}
+.tk .n{font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-left:5px}
+.tk.hot{color:var(--neg);background:rgba(var(--neg-soft),.13)}
+.tk.hot b{color:var(--neg);opacity:.75}
+.tk.clown{color:var(--ink-3)}
+
 /* ---------- stats ---------- */
 .stats{
   display:grid;grid-template-columns:repeat(5,1fr);gap:1px;
@@ -425,6 +463,11 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
 
 <div class="wrap">
   <div id="boardView">
+  <div class="trail" id="trail" hidden>
+    <span class="tlab">週報提過</span>
+    <div class="trail-clip" id="trailclip"><div class="trail-track" id="trailtrack"></div></div>
+    <span class="tfade"></span>
+  </div>
   <section class="stats" id="stats"></section>
 
   <div class="controls">
@@ -678,7 +721,7 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
     if(state.mode === 'board'){
       state.theme = null; state.group = null; state.sort='group'; state.dir=1;
       syncViewAvail();
-      renderFilters(); renderHead(); renderToggles(); render();
+      renderFilters(); renderHead(); renderToggles(); render(); renderTrail();
     } else {
       state.rep = null; showReports();
     }
@@ -702,9 +745,9 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
     $('#reportView').hidden = mode !== 'report';
     if(mode === 'report'){
       if(!repMarkets.includes(state.mkt)) state.mkt = repMarkets[0];
-      renderTabs(); showReports();
+      renderTabs(); showReports(); stopTrail();
     } else {
-      renderTabs(); renderFilters(); render();
+      renderTabs(); renderFilters(); render(); renderTrail();
     }
     syncOffsets();
   }
@@ -779,7 +822,10 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
     try{
       const html = await fetchReport(file);
       const f = $('#repframe');
-      f.onload = sizeFrame;
+      f.onload = () => {
+        sizeFrame();
+        if(pendingCode){ const c = pendingCode; pendingCode = null; scrollToCard(c); }
+      };
       f.srcdoc = html;
       card.hidden = false;
     }catch(err){
@@ -799,6 +845,128 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
     }catch(e){}
   }
   window.addEventListener('resize', sizeFrame);
+
+  /* ---------- 週報跑馬燈 ---------- */
+  /* 「這檔上週報說了什麼」原本要先想起是哪一期、再點進去翻，
+     所以這條橫帶反過來以個股為入口：直接跳到它最近那期裡自己的那張卡。 */
+  let pendingCode = null;
+
+  function trailStocks(market){
+    const reps = REPORTS.filter(r => r.market === market)
+      .slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    const seen = new Map();
+    for(const r of reps){
+      for(const t of r.stocks){
+        const cur = seen.get(t.code);
+        if(cur){ cur.n++; continue; }         /* 先遇到的就是最近那期 */
+        seen.set(t.code, {code:t.code, name:t.name, tag:t.tag,
+                          file:r.file, date:r.date, n:1});
+      }
+    }
+    return [...seen.values()];
+  }
+
+  function renderTrail(){
+    const items = state.mode === 'board' ? trailStocks(state.mkt) : [];
+    const trail = $('#trail');
+    if(!items.length){ trail.hidden = true; stopTrail(); return; }
+    trail.hidden = false;
+    const html = items.map(t =>
+      `<button class="tk${t.tag ? ' ' + t.tag : ''}" data-code="${esc(t.code)}" data-file="${esc(t.file)}"
+        title="${esc(t.name)}｜最近出現在 ${esc(t.date)} 這期${t.n > 1 ? '（共 ' + t.n + ' 期）' : ''}"
+        ><b>${esc(t.code)}</b>${esc(t.name)}${t.n > 1 ? `<span class="n">${t.n}</span>` : ''}</button>`
+    ).join('');
+    $('#trailtrack').innerHTML = html + html;   /* 要接得起來，同一份鋪兩遍 */
+    trailPos = 0;
+    $('#trailclip').scrollLeft = 0;
+    startTrail();
+  }
+
+  /* 用 scrollLeft 走而不是 CSS transform：這樣滾輪與觸控可以直接撥，
+     停下來時位置也還在，不會跟動畫打架。 */
+  let trailRaf = null, trailPos = 0, trailHold = false, trailLast = 0;
+  const TRAIL_SPEED = 0.042;                   /* px/ms ≈ 42px/s */
+  const trailStill = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function startTrail(){
+    stopTrail();
+    if(trailStill.matches) return;
+    trailLast = 0;
+    trailRaf = requestAnimationFrame(stepTrail);
+  }
+  function stopTrail(){
+    if(trailRaf){ cancelAnimationFrame(trailRaf); trailRaf = null; }
+  }
+  function stepTrail(ts){
+    const clip = $('#trailclip');
+    const half = clip.scrollWidth / 2;
+    if(!trailHold && half > 0){
+      const dt = trailLast ? Math.min(ts - trailLast, 64) : 0;   /* 切回分頁不要暴衝 */
+      trailPos += dt * TRAIL_SPEED;
+      if(trailPos >= half) trailPos -= half;
+      clip.scrollLeft = trailPos;
+    }
+    trailLast = ts;
+    trailRaf = requestAnimationFrame(stepTrail);
+  }
+
+  function holdTrail(){ trailHold = true; }
+  function releaseTrail(){
+    trailHold = false;
+    trailPos = $('#trailclip').scrollLeft;       /* 接手使用者撥到的位置 */
+  }
+  $('#trail').addEventListener('pointerenter', holdTrail);
+  $('#trail').addEventListener('pointerleave', releaseTrail);
+  $('#trail').addEventListener('focusin', holdTrail);
+  /* 在帶子裡用鍵盤跳到下一顆時 focusout 也會觸發，別一閃就跑掉 */
+  $('#trail').addEventListener('focusout', e => {
+    if(!$('#trail').contains(e.relatedTarget)) releaseTrail();
+  });
+  if(trailStill.addEventListener){                /* 舊 Safari 沒有這個介面 */
+    trailStill.addEventListener('change', () => {
+      if(trailStill.matches) stopTrail(); else if(!$('#trail').hidden) startTrail();
+    });
+  }
+
+  $('#trailtrack').addEventListener('click', e => {
+    const b = e.target.closest('.tk'); if(!b) return;
+    openStock(b.dataset.file, b.dataset.code);
+  });
+
+  function openStock(file, code){
+    const meta = REPORTS.find(r => r.file === file);
+    if(!meta) return;
+    state.mkt = meta.market;
+    state.rep = file;
+    state.repq = '';
+    $('#repq').value = '';
+    pendingCode = code;
+    setMode('report');
+    window.scrollTo(0, 0);
+  }
+
+  /* 週報是 srcdoc iframe、而且高度被撐到滿，所以捲的是外層頁面不是 iframe */
+  function scrollToCard(code){
+    const f = $('#repframe');
+    let card = null;
+    try{
+      const d = f.contentDocument;
+      card = [...d.querySelectorAll('.card')].find(c => {
+        const el = c.querySelector('.code');
+        return el && el.textContent.trim() === code;
+      });
+    }catch(e){}
+    if(card){
+      card.style.outline = '2px solid rgba(137,169,221,.75)';
+      card.style.outlineOffset = '4px';
+      setTimeout(() => { card.style.outline = ''; card.style.outlineOffset = ''; }, 2400);
+    }
+    const head = parseFloat(getComputedStyle(document.documentElement)
+                   .getPropertyValue('--head-h')) || 0;
+    const top = f.getBoundingClientRect().top + window.scrollY
+              + (card ? card.getBoundingClientRect().top : 0) - head - 14;
+    window.scrollTo({top: Math.max(top, 0), behavior: 'smooth'});
+  }
 
   /* controls */
   $('#q').addEventListener('input', e => { state.q = e.target.value.trim().toLowerCase(); render(); });
@@ -1125,6 +1293,7 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
   renderHead();
   renderToggles();
   render();
+  renderTrail();
   syncOffsets();
   }
 })();
