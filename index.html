@@ -134,6 +134,18 @@ body{
 .tk.hot{color:var(--neg);background:rgba(var(--neg-soft),.13)}
 .tk.hot b{color:var(--neg);opacity:.75}
 .tk.clown{color:var(--ink-3)}
+/* Stage 徽章：顏色跟表格裡的 Stage 欄一致，掃過去是同一套語彙 */
+.tk .sg{
+  display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;
+  font-family:var(--mono);font-size:10px;
+  color:var(--ink-2);background:var(--surface-2);
+}
+.tk.s2 .sg{color:var(--pos);background:rgba(var(--pos-soft),.16)}
+.tk.s3 .sg{color:var(--neg);background:rgba(var(--neg-soft),.16)}
+.tk.s4 .sg{color:var(--warn);background:var(--warn-soft)}
+/* 點跑馬燈跳到表格裡那一列時閃一下，否則在幾十列裡找不到自己剛點的是哪一列 */
+@keyframes trail-flash{from{background:var(--accent-soft)}to{background:transparent}}
+tbody tr.flash > td{animation:trail-flash 2.2s ease-out}
 @media (hover:none), (max-width:700px){
   /* 手指比游標粗：沒有滑鼠的裝置（含平板）把可點範圍加大 */
   .trail-track{gap:7px;padding:8px 12px}
@@ -141,6 +153,9 @@ body{
 }
 @media (max-width:700px){
   .trail .tlab{padding:0 11px;font-size:10.5px}
+}
+@media (prefers-reduced-motion:reduce){
+  tbody tr.flash > td{animation:none;background:var(--accent-soft)}
 }
 
 /* ---------- stats ---------- */
@@ -472,7 +487,7 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
 <div class="wrap">
   <div id="boardView">
   <div class="trail" id="trail" hidden>
-    <span class="tlab">週報提過</span>
+    <span class="tlab" id="traillabel">週報提過</span>
     <div class="trail-clip" id="trailclip"><div class="trail-track" id="trailtrack"></div></div>
     <span class="tfade"></span>
   </div>
@@ -874,17 +889,50 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
     return [...seen.values()];
   }
 
-  function renderTrail(){
-    const items = state.mode === 'board' ? trailStocks(state.mkt) : [];
-    const trail = $('#trail');
-    if(!items.length){ trail.hidden = true; stopTrail(); return; }
-    trail.hidden = false;
-    const html = items.map(t =>
-      `<button class="tk${t.tag ? ' ' + t.tag : ''}" data-code="${esc(t.code)}" data-file="${esc(t.file)}"
+  /* BTFD 那三個分頁沒有週報可以對應，帶子就換一套排法：
+     照 Pine 的 Stage 1→4 跑（打底的排前面），點下去落在表格自己那一列。
+     日股連 Pine MASTER 都沒有、沒有 Stage，退回 120 天倒數、快到期的先跑。 */
+  function trailItems(market){
+    if(REPORTS.some(r => r.market === market)){
+      return {kind:'report', label:'週報提過', items:trailStocks(market)};
+    }
+    const rows = DATA.markets[market].rows;
+    const byDays = (a, b) => (a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days)
+                          || String(a.code).localeCompare(String(b.code));
+    const staged = rows.filter(r => r.st != null);
+    if(staged.length){
+      return {kind:'stage', label:'Stage 1→4',
+              items:staged.slice().sort((a, b) => a.st - b.st || byDays(a, b))};
+    }
+    return {kind:'days', label:'倒數天數', items:rows.slice().sort(byDays)};
+  }
+
+  function trailChip(kind, t){
+    if(kind === 'report'){
+      return `<button class="tk${t.tag ? ' ' + t.tag : ''}" data-code="${esc(t.code)}" data-file="${esc(t.file)}"
         title="${esc(t.name)}｜最近出現在 ${esc(t.date)} 這期${t.n > 1 ? '（共 ' + t.n + ' 期）' : ''}"
-        ><b>${esc(t.code)}</b>${esc(t.name)}${t.n > 1 ? `<span class="n">${t.n}</span>` : ''}</button>`
-    ).join('');
+        ><b>${esc(t.code)}</b>${esc(t.name)}${t.n > 1 ? `<span class="n">${t.n}</span>` : ''}</button>`;
+    }
+    if(kind === 'stage'){
+      return `<button class="tk s${t.st}" data-code="${esc(t.code)}"
+        title="Stage ${t.st} ${STAGE_NAME[t.st]}${t.stw == null ? '' : '｜連續 ' + t.stw + ' 週'}${t.days == null ? '' : '｜剩 ' + t.days + ' 天'}"
+        ><b>${esc(t.code)}</b>${esc(t.name)}<span class="sg">${t.st}</span></button>`;
+    }
+    return `<button class="tk" data-code="${esc(t.code)}"
+      title="${esc(t.name)}｜剩 ${t.days == null ? '—' : t.days} 天"
+      ><b>${esc(t.code)}</b>${esc(t.name)}<span class="n">${t.days == null ? '—' : t.days + '天'}</span></button>`;
+  }
+
+  function renderTrail(){
+    const trail = $('#trail');
+    const pack = state.mode === 'board' ? trailItems(state.mkt)
+                                        : {kind:'', label:'', items:[]};
+    if(!pack.items.length){ trail.hidden = true; stopTrail(); return; }
+    trail.hidden = false;
+    $('#traillabel').textContent = pack.label;
+    const html = pack.items.map(t => trailChip(pack.kind, t)).join('');
     $('#trailtrack').innerHTML = html + html;   /* 要接得起來，同一份鋪兩遍 */
+    releaseTrail();          /* 上一輪可能停在「按住」沒放掉，換分頁就當它放開了 */
     trailPos = 0;
     $('#trailclip').scrollLeft = 0;
     startTrail();
@@ -959,8 +1007,29 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
 
   $('#trailtrack').addEventListener('click', e => {
     const b = e.target.closest('.tk'); if(!b) return;
-    openStock(b.dataset.file, b.dataset.code);
+    if(b.dataset.file) openStock(b.dataset.file, b.dataset.code);
+    else revealRow(b.dataset.code);
   });
+
+  /* 沒有週報可以跳的市場：落在表格裡那一列 */
+  function revealRow(code){
+    const find = () => [...$('#tbody').querySelectorAll('tr')]
+      .find(x => x.dataset.code === code);
+    let tr = find();
+    if(!tr){                    /* 篩選開著時那一列根本沒被畫出來，先把條件放掉 */
+      state.q = ''; $('#q').value = '';
+      state.theme = null; state.group = null;
+      state.pos = state.up = state.dn = false;
+      ['#tPos', '#tUp', '#tDn'].forEach(s => $(s).setAttribute('aria-pressed', 'false'));
+      state.stages = new Set();
+      renderFilters(); renderToggles(); render();
+      tr = find();
+    }
+    if(!tr) return;
+    tr.classList.add('flash');
+    setTimeout(() => tr.classList.remove('flash'), 2400);
+    tr.scrollIntoView({block:'center'});
+  }
 
   function openStock(file, code){
     const meta = REPORTS.find(r => r.file === file);
@@ -1062,7 +1131,7 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
          <td>${flagCell(r.pw3)}</td>
          <td class="val sep">${fmtVal(r.ws10)}</td>
          <td class="val">${fmtVal(r.ws30)}</td>`;
-    return `<tr>
+    return `<tr data-code="${esc(r.code)}">
       <td class="sticky${srcClass(r.src)}" title="${esc(r.src||'')}"><div class="tick"><span class="c">${esc(r.code)}</span><span class="nm" title="${esc(r.name)}">${esc(r.name)}</span></div></td>
       <td style="text-align:left"><span class="chip" title="${esc(r.group)}">${esc(r.group)}</span></td>
       ${cells}
@@ -1230,7 +1299,7 @@ td.w52.cold span{color:var(--neg);background:rgba(var(--neg-soft),.16);font-weig
       const w52t = r.w52 == null ? '資料不足'
                  : r.w52 === 0 ? '本週就是 52 週新高'
                  : `上次創 52 週新高在 ${r.w52} 週前`;
-      return `<tr>
+      return `<tr data-code="${esc(r.code)}">
         <td class="sticky${srcClass(r.src)}" title="${esc(r.src||'')}"><div class="tick"><span class="c">${esc(r.code)}</span><span class="nm" title="${esc(r.name)}">${esc(r.name)}</span></div></td>
         <td style="text-align:left"><span class="chip" title="${esc(r.group)}">${esc(r.group)}</span></td>
         ${slopes}${crosses}${revs}
